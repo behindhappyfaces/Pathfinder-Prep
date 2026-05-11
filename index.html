@@ -4140,11 +4140,13 @@ function renderLoginForm() {
     <div class="auth-field"><label>Username</label>
       <input type="text" id="login-user" value="${user}" placeholder="Your username" autocomplete="username"></div>
     <div class="auth-field"><label>Password</label>
-      ${_pwField('login-pass','Your password','current-password',"onkeydown="if(event.key==='Enter')doLogin()"")}</div>
+      ${_pwField('login-pass','Your password','current-password','')}</div>
     <div class="auth-error" id="auth-err"></div>
     <button class="auth-btn" id="auth-submit-btn" onclick="doLogin()">Sign In</button>
     <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>
     <div style="text-align:center;margin-top:8px"><a onclick="renderRegisterForm()" style="font-size:11px;color:rgba(255,255,255,.3);cursor:pointer">New user? Create account</a></div>`;
+  const lp = document.getElementById('login-pass');
+  if (lp) lp.onkeydown = e => { if (e.key === 'Enter') doLogin(); };
 }
 
 function renderAdminLoginForm() {
@@ -4154,10 +4156,12 @@ function renderAdminLoginForm() {
     <div class="auth-title">Admin Login</div>
     <div class="auth-sub">Enter the admin password to view student progress.</div>
     <div class="auth-field"><label>Admin Password</label>
-      ${_pwField('admin-pass','Admin password','off',"onkeydown="if(event.key==='Enter')doAdminLogin()"")}</div>
+      ${_pwField('admin-pass','Admin password','off','')}</div>
     <div class="auth-error" id="auth-err"></div>
     <button class="auth-btn" onclick="doAdminLogin()">Admin Sign In</button>
     <div class="auth-switch"><a onclick="renderLoginForm()">Back to student login</a></div>`;
+  const ap = document.getElementById('admin-pass');
+  if (ap) ap.onkeydown = e => { if (e.key === 'Enter') doAdminLogin(); };
 }
 
 function _hash(str) {
