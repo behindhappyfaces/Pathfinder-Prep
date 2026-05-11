@@ -4015,8 +4015,10 @@ function renderLuminaries() {
 // ============================================================
 // AUTH SYSTEM
 // ============================================================
-const ADMIN_PW = 'PathfinderCoach2026';
-const AUTH_KEY = 'pathfinder_auth';
+const ADMIN_PW    = 'PathfinderCoach2026';
+const AUTH_KEY    = 'pathfinder_auth';
+const MASTER_USER = 'CMSAaron';
+const MASTER_HASH = 'f61775c8UEYyNjpTdWNjZXNzMjAyNg';
 let _loggedIn = false;
 
 function _isSessionActive() { return localStorage.getItem(AUTH_KEY) === '1'; }
@@ -4057,8 +4059,7 @@ function logOut() {
 
 function showAuthOverlay() {
   const ov = document.getElementById('authOverlay'); if (ov) ov.style.display = 'flex';
-  if (FB_ON) { renderLoginForm(); return; }
-  if (!STATE.auth || !STATE.auth.passwordHash) renderRegisterForm(); else renderLoginForm();
+  renderLoginForm();
 }
 function hideAuthOverlay() { const ov = document.getElementById('authOverlay'); if (ov) ov.style.display = 'none'; }
 
@@ -4160,18 +4161,21 @@ async function doLogin() {
   const pass = (document.getElementById('login-pass') || {}).value;
   if (!user || !pass) { _authErr('Please enter both fields.'); return; }
 
+  // Check master hardcoded account first (works on every browser)
+  if (user.toLowerCase() === MASTER_USER.toLowerCase() && _hash(pass) === MASTER_HASH) {
+    STATE.auth = STATE.auth && STATE.auth.username ? STATE.auth : { username: MASTER_USER, created: '' };
+    saveState(); _authSuccess(MASTER_USER); return;
+  }
   if (FB_ON) {
     const btn = document.getElementById('auth-submit-btn');
     if (btn) { btn.dataset.label = 'Sign In'; btn.disabled = true; btn.textContent = 'Signing in…'; }
     try {
       await _fbAuth.signInWithEmailAndPassword(_fbEmail(user), pass);
-      // onAuthStateChanged handles the rest
     } catch(e) { _authErr(_fbErrMsg(e.code)); }
     return;
   }
-  if (!STATE.auth || !STATE.auth.passwordHash) { _authErr('No account found. Please register.'); renderRegisterForm(); return; }
-  if (user.toLowerCase() !== STATE.auth.username.toLowerCase()) { _authErr('Username not recognised.'); return; }
-  if (_hash(pass) !== STATE.auth.passwordHash) { _authErr('Incorrect password.'); return; }
+  if (!STATE.auth || !STATE.auth.passwordHash) { _authErr('Incorrect username or password.'); return; }
+  if (user.toLowerCase() !== STATE.auth.username.toLowerCase() || _hash(pass) !== STATE.auth.passwordHash) { _authErr('Incorrect username or password.'); return; }
   _authSuccess(user);
 }
 
