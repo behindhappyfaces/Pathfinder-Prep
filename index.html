@@ -3993,9 +3993,12 @@ function renderLuminaries() {
 const ADMIN_PW = 'PathfinderCoach2026';
 let _loggedIn = false;
 
-async function _hash(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+function _hash(str) {
+  // djb2 + btoa — synchronous, works in all browsers, no secure-context required
+  let h = 5381;
+  const s = 'PF26:' + str;
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(16) + btoa(unescape(encodeURIComponent(s))).replace(/[=+/]/g,'');
 }
 
 function togglePassVis(inputId, btn) {
@@ -4069,7 +4072,15 @@ function renderLoginForm() {
       ${_pwField('login-pass','Your password','current-password',"onkeydown=\"if(event.key==='Enter')doLogin()\"")}</div>
     <div class="auth-error" id="auth-err"></div>
     <button class="auth-btn" onclick="doLogin()">Sign In</button>
-    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>`;
+    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>
+    <div style="text-align:center;margin-top:8px"><a onclick="clearAuthData()" style="font-size:10px;color:rgba(255,255,255,.2);cursor:pointer">First time here? Create new account</a></div>`;
+}
+
+function clearAuthData() {
+  if (!confirm('This will clear your saved login. You will need to register again. Continue?')) return;
+  STATE.auth = {username:'', passwordHash:'', created:'', loggedIn:false};
+  saveState();
+  renderRegisterForm();
 }
 
 function renderAdminLoginForm() {
@@ -4085,7 +4096,7 @@ function renderAdminLoginForm() {
     <div class="auth-switch"><a onclick="renderLoginForm()">Back to student login</a></div>`;
 }
 
-async function doRegister() {
+function doRegister() {
   const user = (document.getElementById('reg-user') || {}).value.trim();
   const pass = (document.getElementById('reg-pass') || {}).value;
   const pass2 = (document.getElementById('reg-pass2') || {}).value;
@@ -4094,7 +4105,7 @@ async function doRegister() {
   if (user.length < 2) { err.textContent = 'Username must be at least 2 characters.'; return; }
   if (!pass || pass.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
   if (pass !== pass2) { err.textContent = 'Passwords do not match.'; return; }
-  const hash = await _hash(pass);
+  const hash = _hash(pass);
   STATE.auth = { username: user, passwordHash: hash, created: new Date().toISOString() };
   // Also set hero name if not set
   if (!STATE.name) {
@@ -4109,14 +4120,14 @@ async function doRegister() {
   hideAuthOverlay();
 }
 
-async function doLogin() {
+function doLogin() {
   const user = (document.getElementById('login-user') || {}).value.trim();
   const pass = (document.getElementById('login-pass') || {}).value;
   const err = document.getElementById('auth-err');
   if (!user || !pass) { err.textContent = 'Please enter both username and password.'; return; }
   if (!STATE.auth || !STATE.auth.username) { err.textContent = 'No account found. Please register.'; renderRegisterForm(); return; }
   if (user.toLowerCase() !== STATE.auth.username.toLowerCase()) { err.textContent = 'Username not recognized.'; return; }
-  const hash = await _hash(pass);
+  const hash = _hash(pass);
   if (hash !== STATE.auth.passwordHash) { err.textContent = 'Incorrect password. Contact your coach to reset.'; return; }
   STATE.auth.loggedIn = true;
   saveState();
