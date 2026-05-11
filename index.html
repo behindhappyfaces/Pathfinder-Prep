@@ -1290,35 +1290,11 @@ section.card:nth-child(5){animation-delay:.25s}
 </div><!-- /.wrap -->
 </main><!-- /.main -->
 
-<!-- Firebase SDK (cross-browser auth + cloud sync) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
 <script>
 // ============================================================
 // DATA CONSTANTS
 // ============================================================
-
-// ============================================================
-// FIREBASE CONFIGURATION — replace placeholder values to enable cross-browser login
-// Get config from: console.firebase.google.com → Project Settings → Web app
-// ============================================================
-const FIREBASE_CONFIG = {
-  apiKey:            "PASTE_YOUR_API_KEY_HERE",
-  authDomain:        "PASTE_YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "PASTE_YOUR_PROJECT_ID",
-  storageBucket:     "PASTE_YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId:             "PASTE_YOUR_APP_ID"
-};
-const FIREBASE_CONFIGURED = FIREBASE_CONFIG.apiKey !== "PASTE_YOUR_API_KEY_HERE";
-let fbApp, fbAuth, fbDb;
-if (FIREBASE_CONFIGURED) {
-  fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
-  fbAuth = firebase.auth();
-  fbDb   = firebase.firestore();
-}
 
 const ROADMAP = [
   {week:'WK 1', label:'Baseline Assessment', color:'#4ECDC4', phase:'Phase 1',
@@ -1878,10 +1854,6 @@ function loadState() {
 function saveState() {
   STATE.lastActivity = new Date().toISOString();
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch(e) {}
-  if (FIREBASE_CONFIGURED && typeof fbAuth !== 'undefined' && fbAuth.currentUser) {
-    clearTimeout(_fbSaveTimer);
-    _fbSaveTimer = setTimeout(_fbSaveState, 2000);
-  }
 }
 
 const _saved = loadState();
@@ -1916,7 +1888,8 @@ const STATE = {
   pb: _saved.pb || {step:0, answers:{}, done:false},
   reminders: _saved.reminders || {enabled:false, times:['09:00'], message:'', sent:{}},
   vocabOrder: _saved.vocabOrder || [],
-  shuffleDate: _saved.shuffleDate || ''
+  shuffleDate: _saved.shuffleDate || '',
+  loggedIn: _saved.loggedIn || false
 };
 
 // ============================================================
@@ -4016,57 +3989,14 @@ function renderLuminaries() {
 }
 
 // ============================================================
-// AUTH SYSTEM — Firebase (cross-browser) with localStorage fallback
+// AUTH SYSTEM — shared access code (one login for all students)
 // ============================================================
-const ADMIN_PW = 'PathfinderCoach2026';
+// Share these credentials with every student who should have access:
+const STUDENT_USER = 'pathfinder';
+const STUDENT_PASS = 'Prep2026!';
+const ADMIN_PW     = 'PathfinderCoach2026';
+
 let _loggedIn = false;
-let _fbSaveTimer = null;
-
-// ── Firebase helpers ────────────────────────────────────────────
-
-function _toFbEmail(username) {
-  return username.toLowerCase().replace(/[^a-z0-9._-]/g, '') + '@pf.prep';
-}
-
-function _fbErrMsg(code) {
-  const m = {
-    'auth/email-already-in-use': 'That username is already taken. Try a different one.',
-    'auth/weak-password': 'Password must be at least 6 characters.',
-    'auth/user-not-found': 'Incorrect username or password.',
-    'auth/wrong-password': 'Incorrect username or password.',
-    'auth/invalid-email': 'Invalid username format.',
-    'auth/too-many-requests': 'Too many attempts. Wait a moment and try again.',
-    'auth/network-request-failed': 'Network error. Check your connection.',
-    'auth/invalid-credential': 'Incorrect username or password.',
-  };
-  return m[code] || ('Sign-in error. Please try again. (' + code + ')');
-}
-
-async function _fbSaveState() {
-  if (!FIREBASE_CONFIGURED) return;
-  const user = fbAuth.currentUser;
-  if (!user) return;
-  try {
-    await fbDb.collection('users').doc(user.uid).set({
-      data: JSON.stringify(STATE),
-      updated: new Date().toISOString()
-    });
-  } catch(e) { console.warn('Firestore save failed:', e); }
-}
-
-async function _fbLoadState(uid) {
-  if (!FIREBASE_CONFIGURED) return;
-  try {
-    const doc = await fbDb.collection('users').doc(uid).get();
-    if (doc.exists) {
-      const saved = JSON.parse(doc.data().data || '{}');
-      Object.assign(STATE, saved);
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch(e) {}
-    }
-  } catch(e) { console.warn('Firestore load failed:', e); }
-}
-
-// ── UI helpers ──────────────────────────────────────────────────
 
 function togglePassVis(inputId, btn) {
   const inp = document.getElementById(inputId);
@@ -4074,12 +4004,11 @@ function togglePassVis(inputId, btn) {
   const showing = inp.type === 'text';
   inp.type = showing ? 'password' : 'text';
   btn.textContent = showing ? 'Show' : 'Hide';
-  btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
 }
 
-function _pwField(id, placeholder, autocomplete, extraAttrs) {
+function _pwField(id, placeholder, autocomplete) {
   return `<div style="position:relative">
-    <input type="password" id="${id}" placeholder="${placeholder}" autocomplete="${autocomplete}" ${extraAttrs||''}
+    <input type="password" id="${id}" placeholder="${placeholder}" autocomplete="${autocomplete}"
       style="width:100%;padding:10px 52px 10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:14px;box-sizing:border-box;outline:none">
     <button type="button" onclick="togglePassVis('${id}',this)"
       style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:rgba(255,255,255,.45);cursor:pointer;font-size:12px;font-weight:600;padding:2px 4px">Show</button>
@@ -4088,63 +4017,36 @@ function _pwField(id, placeholder, autocomplete, extraAttrs) {
 
 function logOut() {
   _loggedIn = false;
-  if (FIREBASE_CONFIGURED) {
-    fbAuth.signOut();
-  } else {
-    if (STATE.auth) { STATE.auth.loggedIn = false; saveState(); }
-    renderLoginForm();
-    showAuthOverlay();
-  }
+  STATE.loggedIn = false;
+  saveState();
+  showAuthOverlay();
 }
 
 function showAuthOverlay() {
   const overlay = document.getElementById('authOverlay');
-  if (overlay) { overlay.style.display = 'flex'; overlay.classList.remove('hidden'); }
-  if (!FIREBASE_CONFIGURED && (!STATE.auth || !STATE.auth.username)) {
-    renderRegisterForm();
-  } else {
-    renderLoginForm();
-  }
+  if (overlay) overlay.style.display = 'flex';
+  renderLoginForm();
 }
 
 function hideAuthOverlay() {
   const overlay = document.getElementById('authOverlay');
-  if (overlay) { overlay.classList.add('hidden'); setTimeout(() => { overlay.style.display = 'none'; }, 400); }
-}
-
-function renderRegisterForm() {
-  const c = document.getElementById('authContent');
-  if (!c) return;
-  c.innerHTML = `
-    <div class="auth-title">Create Your Account</div>
-    <div class="auth-sub">Your progress saves to the cloud — sign in from any browser, any device.</div>
-    <div class="auth-field"><label>Username</label>
-      <input type="text" id="reg-user" placeholder="e.g. JSmith2026" autocomplete="username"></div>
-    <div class="auth-field"><label>Password</label>
-      ${_pwField('reg-pass','Choose a password (6+ characters)','new-password','')}</div>
-    <div class="auth-field"><label>Confirm Password</label>
-      ${_pwField('reg-pass2','Repeat your password','new-password','')}</div>
-    <div class="auth-error" id="auth-err"></div>
-    <button class="auth-btn" id="auth-submit-btn" onclick="doRegister()">Create Account &amp; Start Training</button>
-    <div class="auth-switch">Already have an account? <a onclick="renderLoginForm()">Sign in</a></div>
-    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>`;
+  if (overlay) overlay.style.display = 'none';
 }
 
 function renderLoginForm() {
   const c = document.getElementById('authContent');
   if (!c) return;
-  const user = (STATE.auth && STATE.auth.username) || '';
   c.innerHTML = `
-    <div class="auth-title">Welcome back${user ? ', ' + user : ''}!</div>
-    <div class="auth-sub">Sign in to access your training from any browser.</div>
+    <div class="auth-title">Sign In to Access</div>
+    <div class="auth-sub">Enter your access credentials to open your training workbook.</div>
     <div class="auth-field"><label>Username</label>
-      <input type="text" id="login-user" value="${user}" placeholder="Your username" autocomplete="username"></div>
+      <input type="text" id="login-user" placeholder="Username" autocomplete="username"
+        style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:14px;box-sizing:border-box;outline:none"></div>
     <div class="auth-field"><label>Password</label>
-      ${_pwField('login-pass','Your password','current-password','')}</div>
+      ${_pwField('login-pass','Password','current-password')}</div>
     <div class="auth-error" id="auth-err"></div>
     <button class="auth-btn" id="auth-submit-btn" onclick="doLogin()">Sign In</button>
-    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>
-    <div style="text-align:center;margin-top:8px"><a onclick="renderRegisterForm()" style="font-size:11px;color:rgba(255,255,255,.3);cursor:pointer">New user? Create account</a></div>`;
+    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>`;
   const lp = document.getElementById('login-pass');
   if (lp) lp.onkeydown = e => { if (e.key === 'Enter') doLogin(); };
 }
@@ -4156,7 +4058,7 @@ function renderAdminLoginForm() {
     <div class="auth-title">Admin Login</div>
     <div class="auth-sub">Enter the admin password to view student progress.</div>
     <div class="auth-field"><label>Admin Password</label>
-      ${_pwField('admin-pass','Admin password','off','')}</div>
+      ${_pwField('admin-pass','Admin password','off')}</div>
     <div class="auth-error" id="auth-err"></div>
     <button class="auth-btn" onclick="doAdminLogin()">Admin Sign In</button>
     <div class="auth-switch"><a onclick="renderLoginForm()">Back to student login</a></div>`;
@@ -4164,78 +4066,29 @@ function renderAdminLoginForm() {
   if (ap) ap.onkeydown = e => { if (e.key === 'Enter') doAdminLogin(); };
 }
 
-function _hash(str) {
-  let h = 5381;
-  const s = 'PF26:' + str;
-  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
-  return h.toString(16) + btoa(unescape(encodeURIComponent(s))).replace(/[=+/]/g,'');
-}
-
-async function doRegister() {
-  const user = (document.getElementById('reg-user') || {}).value.trim();
-  const pass = (document.getElementById('reg-pass') || {}).value;
-  const pass2 = (document.getElementById('reg-pass2') || {}).value;
-  const err = document.getElementById('auth-err');
-  const btn = document.getElementById('auth-submit-btn');
-  if (!user) { err.textContent = 'Please enter a username.'; return; }
-  if (user.length < 2) { err.textContent = 'Username must be at least 2 characters.'; return; }
-  if (!pass || pass.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
-  if (pass !== pass2) { err.textContent = 'Passwords do not match.'; return; }
-  if (!FIREBASE_CONFIGURED) {
-    const hash = _hash(pass);
-    STATE.auth = { username: user, passwordHash: hash, created: new Date().toISOString() };
-    if (!STATE.name) { STATE.name = user; const ni = document.getElementById('nameInput'); if (ni) ni.value = user; const hn = document.getElementById('heroName'); if (hn) hn.textContent = user; }
-    STATE.auth.loggedIn = true; saveState(); _loggedIn = true; hideAuthOverlay(); return;
-  }
-  if (btn) { btn.disabled = true; btn.textContent = 'Creating account…'; }
-  err.textContent = '';
-  try {
-    const email = _toFbEmail(user);
-    const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
-    await cred.user.updateProfile({ displayName: user });
-    STATE.auth = { username: user, created: new Date().toISOString() };
-    if (!STATE.name) {
-      STATE.name = user;
-      const ni = document.getElementById('nameInput'); if (ni) ni.value = user;
-      const hn = document.getElementById('heroName'); if (hn) hn.textContent = user;
-    }
-    saveState();
-    _loggedIn = true;
-    hideAuthOverlay();
-  } catch(e) {
-    err.textContent = _fbErrMsg(e.code);
-    if (btn) { btn.disabled = false; btn.textContent = 'Create Account & Start Training'; }
-  }
-}
-
-async function doLogin() {
+function doLogin() {
   const user = (document.getElementById('login-user') || {}).value.trim();
   const pass = (document.getElementById('login-pass') || {}).value;
-  const err = document.getElementById('auth-err');
-  const btn = document.getElementById('auth-submit-btn');
+  const err  = document.getElementById('auth-err');
   if (!user || !pass) { err.textContent = 'Please enter both username and password.'; return; }
-  if (!FIREBASE_CONFIGURED) {
-    if (!STATE.auth || !STATE.auth.username) { err.textContent = 'No account found. Please register.'; renderRegisterForm(); return; }
-    if (user.toLowerCase() !== STATE.auth.username.toLowerCase()) { err.textContent = 'Username not recognized.'; return; }
-    const hash = _hash(pass);
-    if (hash !== STATE.auth.passwordHash) { err.textContent = 'Incorrect password. Contact your coach to reset.'; return; }
-    STATE.auth.loggedIn = true; saveState(); _loggedIn = true; hideAuthOverlay(); return;
+  if (user.toLowerCase() !== STUDENT_USER.toLowerCase() || pass !== STUDENT_PASS) {
+    err.textContent = 'Incorrect username or password. Contact your coach.';
+    return;
   }
-  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
-  err.textContent = '';
-  try {
-    const email = _toFbEmail(user);
-    await fbAuth.signInWithEmailAndPassword(email, pass);
-    // onAuthStateChanged handles the rest
-  } catch(e) {
-    err.textContent = _fbErrMsg(e.code);
-    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+  STATE.loggedIn = true;
+  if (!STATE.name) {
+    STATE.name = user;
+    const ni = document.getElementById('nameInput'); if (ni) ni.value = user;
+    const hn = document.getElementById('heroName'); if (hn) hn.textContent = user;
   }
+  saveState();
+  _loggedIn = true;
+  hideAuthOverlay();
 }
 
 function doAdminLogin() {
   const pass = (document.getElementById('admin-pass') || {}).value;
-  const err = document.getElementById('auth-err');
+  const err  = document.getElementById('auth-err');
   if (!pass) { err.textContent = 'Enter the admin password.'; return; }
   if (pass !== ADMIN_PW) { err.textContent = 'Incorrect admin password.'; return; }
   hideAuthOverlay();
@@ -4243,89 +4096,6 @@ function doAdminLogin() {
   showAdminPanel();
 }
 
-function clearAuthData() {
-  if (!confirm('This will clear your saved login. You will need to register again. Continue?')) return;
-  STATE.auth = {username:'', passwordHash:'', created:'', loggedIn:false};
-  saveState();
-  renderRegisterForm();
-}
-
-// ============================================================
-// ADMIN PANEL
-// ============================================================
-function showAdminPanel() {
-  const overlay = document.getElementById('adminOverlay');
-  const panel = document.getElementById('adminPanel');
-  if (!overlay || !panel) return;
-  overlay.classList.remove('hidden');
-
-  const auth = STATE.auth || {};
-  const skills = calcSkillLevels();
-  const vocabAtt  = Object.keys(STATE.vocabStatus || {}).length;
-  const vocabCor  = Object.values(STATE.vocabStatus || {}).filter(v => v === 'correct').length;
-  const arAtt     = Object.keys(STATE.arStatus || {}).length;
-  const arCor     = Object.values(STATE.arStatus || {}).filter(v => v === 'correct').length;
-  const dlabKeys  = DLAB_SETS.flatMap(s => s.exercises.map((_, i) => s.id + '_' + i));
-  const dlabAtt   = dlabKeys.filter(k => (STATE.dlabStatus || {})[k]).length;
-  const dlabCor   = dlabKeys.filter(k => (STATE.dlabStatus || {})[k] === 'correct').length;
-  const roadmapDone = Object.values(STATE.roadmapChecked || {}).filter(Boolean).length;
-  const totalRoadmap = ROADMAP.reduce((s, w) => s + w.tasks.length, 0);
-  const history = (STATE.sessions || []).slice(-20).reverse();
-  const days2 = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  let dayStreak = 0;
-  outerAdmin: for (let w = 8; w >= 1; w--) { for (let d = days2.length-1; d >= 0; d--) { if (STATE.tracker && STATE.tracker['w'+w+'-'+days2[d]]) dayStreak++; else if (dayStreak > 0) break outerAdmin; } }
-  const created = auth.created ? new Date(auth.created).toLocaleDateString() : 'Unknown';
-  const lastActivity = STATE.lastActivity ? new Date(STATE.lastActivity).toLocaleDateString() : '—';
-
-  panel.innerHTML = `
-    <h2>&#128274; Admin View</h2>
-    <div class="admin-sub">Student: <strong style="color:#fff">${auth.username || 'Unknown'}</strong> &nbsp;|&nbsp; Registered: ${created} &nbsp;|&nbsp; Streak: ${dayStreak} days &nbsp;|&nbsp; Last active: ${lastActivity}</div>
-    <div class="admin-stat-grid">
-      <div class="admin-stat"><div class="val">${vocabAtt ? Math.round(vocabCor/vocabAtt*100) : 0}%</div><div class="lbl">Vocab Accuracy (${vocabCor}/${vocabAtt})</div></div>
-      <div class="admin-stat"><div class="val">${arAtt ? Math.round(arCor/arAtt*100) : 0}%</div><div class="lbl">AR Accuracy (${arCor}/${arAtt})</div></div>
-      <div class="admin-stat"><div class="val">${dlabAtt ? Math.round(dlabCor/dlabAtt*100) : 0}%</div><div class="lbl">DLAB Accuracy (${dlabCor}/${dlabAtt})</div></div>
-      <div class="admin-stat"><div class="val">${roadmapDone}/${totalRoadmap}</div><div class="lbl">Roadmap Tasks Done</div></div>
-      <div class="admin-stat"><div class="val">${STATE.scores ? STATE.scores.vocab || 0 : 0}</div><div class="lbl">Vocab Score</div></div>
-      <div class="admin-stat"><div class="val">${dayStreak}</div><div class="lbl">Day Streak</div></div>
-    </div>
-    <div class="admin-section">
-      <h3>Skill Levels (Auto-Computed)</h3>
-      ${Object.entries(skills).map(([k,v]) => {
-        const s = SKILLS.find(x => x.id === k);
-        const bar = v < 4 ? '#FF6B6B' : v < 7 ? '#FFBF00' : '#4ECDC4';
-        return `<div style="margin-bottom:8px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;color:rgba(255,255,255,.7);margin-bottom:3px">
-            <span>${s ? s.label : k}</span><span>${v}/10</span></div>
-          <div style="height:5px;border-radius:3px;background:rgba(255,255,255,.1)">
-            <div style="height:100%;width:${v*10}%;background:${bar};border-radius:3px"></div></div></div>`;
-      }).join('')}
-    </div>
-    <div class="admin-section">
-      <h3>Recent Activity (Last 20 Answers)</h3>
-      ${history.length ? history.map(h => `<div class="admin-history-item">${h.section} — ${h.correct ? '&#10003; Correct' : '&#10007; Wrong'} — ${new Date(h.ts).toLocaleString()}</div>`).join('') : '<div style="font-size:12px;color:rgba(255,255,255,.3)">No activity recorded yet.</div>'}
-    </div>
-    <div class="admin-section">
-      <h3>Completed Roadmap Tasks</h3>
-      <div style="font-size:12px;color:rgba(255,255,255,.6)">${roadmapDone} of ${totalRoadmap} tasks completed</div>
-    </div>
-    <div style="margin-top:24px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="admin-btn admin-btn-danger" onclick="adminResetPassword()">Reset Student Password</button>
-      <button class="admin-btn admin-btn-close" onclick="document.getElementById('adminOverlay').classList.add('hidden')">Close Admin Panel</button>
-    </div>`;
-}
-
-function adminResetPassword() {
-  if (!FIREBASE_CONFIGURED) {
-    if (!confirm('This will log the student out and require them to set a new password. Continue?')) return;
-    const username = (STATE.auth || {}).username;
-    STATE.auth = { username: username || '', passwordHash: '', created: STATE.auth ? STATE.auth.created : '' };
-    saveState();
-    alert('Password reset. The student will be prompted to create a new password on next login.');
-    document.getElementById('adminOverlay').classList.add('hidden');
-    return;
-  }
-  alert('To reset the student\'s password:\n\n1. Go to console.firebase.google.com\n2. Select your project → Authentication → Users\n3. Find the student account\n4. Click the menu ⋮ → Delete account\n\nThe student can then re-register with their username and a new password.');
-}
 
 // ============================================================
 // NOTIFICATION / REMINDER SYSTEM
@@ -4469,49 +4239,19 @@ setInterval(checkReminders, 60000);
 document.addEventListener('DOMContentLoaded', () => {
   if (!STATE.branch || STATE.branch === 'army') STATE.branch = 'af';
   initShuffleOrders();
-
-  function _bootApp() {
-    init();
-    restoreNoteFields();
-    renderBranchRequirements();
-    renderEligibilityQuiz();
-    switchBranch(STATE.branch);
-    calcStreak();
-    setTimeout(updateBellDot, 500);
+  init();
+  restoreNoteFields();
+  renderBranchRequirements();
+  renderEligibilityQuiz();
+  switchBranch(STATE.branch);
+  calcStreak();
+  if (STATE.loggedIn) {
+    _loggedIn = true;
+    hideAuthOverlay();
+  } else {
+    showAuthOverlay();
   }
-
-  if (!FIREBASE_CONFIGURED) {
-    // No Firebase config yet — use localStorage auth
-    _bootApp();
-    if (STATE.auth && STATE.auth.username && STATE.auth.passwordHash && STATE.auth.loggedIn) {
-      _loggedIn = true;
-    } else {
-      showAuthOverlay();
-    }
-    return;
-  }
-
-  // Firebase configured: show loading screen, wait for auth state
-  const overlay = document.getElementById('authOverlay');
-  const content = document.getElementById('authContent');
-  if (overlay) { overlay.style.display = 'flex'; overlay.classList.remove('hidden'); }
-  if (content) content.innerHTML = '<div style="color:rgba(255,255,255,.75);text-align:center;padding:48px 20px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.2s linear infinite;display:inline-block">&#9685;</div><br><div style="font-size:15px;margin-top:12px;font-weight:500">Connecting to your account…</div><div style="font-size:12px;color:rgba(255,255,255,.4);margin-top:6px">Your progress syncs across all your devices</div></div>';
-
-  fbAuth.onAuthStateChanged(async (user) => {
-    if (user) {
-      _loggedIn = true;
-      STATE.auth = STATE.auth || {};
-      STATE.auth.username = user.displayName || user.email.split('@')[0];
-      await _fbLoadState(user.uid);
-      _bootApp();
-      hideAuthOverlay();
-    } else {
-      _loggedIn = false;
-      _bootApp();
-      renderLoginForm();
-      if (overlay) { overlay.style.display = 'flex'; overlay.classList.remove('hidden'); }
-    }
-  });
+  setTimeout(updateBellDot, 500);
 });
 </script>
 
@@ -4522,7 +4262,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 <!-- Auth Overlay -->
-<div id="authOverlay">
+<div id="authOverlay" style="display:none">
   <div class="auth-box" id="authBox">
     <div class="auth-logo">Path<span>finder</span></div>
     <div class="auth-tagline">Air Force 1N3X1 — Cryptologic Language Analyst Prep</div>
