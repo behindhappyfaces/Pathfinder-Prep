@@ -3989,18 +3989,22 @@ function renderLuminaries() {
 }
 
 // ============================================================
-// AUTH SYSTEM — shared access code (one login for all students)
+// AUTH SYSTEM
 // ============================================================
-// Share these credentials with every student who should have access:
-const STUDENT_USER = 'pathfinder';
-const STUDENT_PASS = 'Prep2026!';
-const ADMIN_PW     = 'PathfinderCoach2026';
-const AUTH_KEY     = 'pathfinder_auth';
+const ADMIN_PW = 'PathfinderCoach2026';
+const AUTH_KEY = 'pathfinder_auth';
 
 let _loggedIn = false;
 
 function _isSessionActive() { return localStorage.getItem(AUTH_KEY) === '1'; }
 function _setSession(v)     { if (v) localStorage.setItem(AUTH_KEY,'1'); else localStorage.removeItem(AUTH_KEY); }
+
+function _hash(str) {
+  let h = 5381;
+  const s = 'PF26:' + str;
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(16) + btoa(unescape(encodeURIComponent(s))).replace(/[=+/]/g,'');
+}
 
 function togglePassVis(inputId, btn) {
   const inp = document.getElementById(inputId);
@@ -4028,7 +4032,11 @@ function logOut() {
 function showAuthOverlay() {
   const overlay = document.getElementById('authOverlay');
   if (overlay) overlay.style.display = 'flex';
-  renderLoginForm();
+  if (!STATE.auth || !STATE.auth.passwordHash) {
+    renderRegisterForm();
+  } else {
+    renderLoginForm();
+  }
 }
 
 function hideAuthOverlay() {
@@ -4036,20 +4044,40 @@ function hideAuthOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
-function renderLoginForm() {
+function renderRegisterForm() {
   const c = document.getElementById('authContent');
   if (!c) return;
   c.innerHTML = `
-    <div class="auth-title">Sign In to Access</div>
-    <div class="auth-sub">Enter your access credentials to open your training workbook.</div>
+    <div class="auth-title">Create Your Account</div>
+    <div class="auth-sub">Set up your username and password. Share these with anyone who should access the workbook.</div>
     <div class="auth-field"><label>Username</label>
-      <input type="text" id="login-user" placeholder="Username" autocomplete="username"
+      <input type="text" id="reg-user" placeholder="Choose a username" autocomplete="username"
+        style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:14px;box-sizing:border-box;outline:none"></div>
+    <div class="auth-field"><label>Password</label>
+      ${_pwField('reg-pass','Choose a password','new-password')}</div>
+    <div class="auth-field"><label>Confirm Password</label>
+      ${_pwField('reg-pass2','Repeat password','new-password')}</div>
+    <div class="auth-error" id="auth-err"></div>
+    <button class="auth-btn" onclick="doRegister()">Create Account</button>
+    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>`;
+}
+
+function renderLoginForm() {
+  const c = document.getElementById('authContent');
+  if (!c) return;
+  const user = (STATE.auth && STATE.auth.username) || '';
+  c.innerHTML = `
+    <div class="auth-title">Welcome back${user ? ', ' + user : ''}!</div>
+    <div class="auth-sub">Sign in to continue your training.</div>
+    <div class="auth-field"><label>Username</label>
+      <input type="text" id="login-user" value="${user}" placeholder="Username" autocomplete="username"
         style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:14px;box-sizing:border-box;outline:none"></div>
     <div class="auth-field"><label>Password</label>
       ${_pwField('login-pass','Password','current-password')}</div>
     <div class="auth-error" id="auth-err"></div>
-    <button class="auth-btn" id="auth-submit-btn" onclick="doLogin()">Sign In</button>
-    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>`;
+    <button class="auth-btn" onclick="doLogin()">Sign In</button>
+    <div class="auth-admin-link"><a onclick="renderAdminLoginForm()">Admin access</a></div>
+    <div style="text-align:center;margin-top:8px"><a onclick="clearAuthData()" style="font-size:11px;color:rgba(255,255,255,.25);cursor:pointer">Reset account</a></div>`;
   const lp = document.getElementById('login-pass');
   if (lp) lp.onkeydown = e => { if (e.key === 'Enter') doLogin(); };
 }
@@ -4069,22 +4097,36 @@ function renderAdminLoginForm() {
   if (ap) ap.onkeydown = e => { if (e.key === 'Enter') doAdminLogin(); };
 }
 
-function doLogin() {
-  const user = (document.getElementById('login-user') || {}).value.trim();
-  const pass = (document.getElementById('login-pass') || {}).value;
-  const err  = document.getElementById('auth-err');
-  if (!user || !pass) { err.textContent = 'Please enter both username and password.'; return; }
-  if (user.toLowerCase() !== STUDENT_USER.toLowerCase() || pass !== STUDENT_PASS) {
-    err.textContent = 'Incorrect username or password. Contact your coach.';
-    return;
-  }
-  _setSession(true);
+function doRegister() {
+  const user  = (document.getElementById('reg-user')  || {}).value.trim();
+  const pass  = (document.getElementById('reg-pass')  || {}).value;
+  const pass2 = (document.getElementById('reg-pass2') || {}).value;
+  const err   = document.getElementById('auth-err');
+  if (!user)             { err.textContent = 'Please enter a username.'; return; }
+  if (user.length < 2)   { err.textContent = 'Username must be at least 2 characters.'; return; }
+  if (!pass || pass.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
+  if (pass !== pass2)    { err.textContent = 'Passwords do not match.'; return; }
+  STATE.auth = { username: user, passwordHash: _hash(pass), created: new Date().toISOString() };
   if (!STATE.name) {
     STATE.name = user;
     const ni = document.getElementById('nameInput'); if (ni) ni.value = user;
     const hn = document.getElementById('heroName'); if (hn) hn.textContent = user;
-    saveState();
   }
+  saveState();
+  _setSession(true);
+  _loggedIn = true;
+  hideAuthOverlay();
+}
+
+function doLogin() {
+  const user = (document.getElementById('login-user') || {}).value.trim();
+  const pass = (document.getElementById('login-pass') || {}).value;
+  const err  = document.getElementById('auth-err');
+  if (!user || !pass) { err.textContent = 'Please enter both fields.'; return; }
+  if (!STATE.auth || !STATE.auth.passwordHash) { err.textContent = 'No account found. Please register first.'; renderRegisterForm(); return; }
+  if (user.toLowerCase() !== STATE.auth.username.toLowerCase()) { err.textContent = 'Username not recognised.'; return; }
+  if (_hash(pass) !== STATE.auth.passwordHash) { err.textContent = 'Incorrect password.'; return; }
+  _setSession(true);
   _loggedIn = true;
   hideAuthOverlay();
 }
@@ -4097,6 +4139,14 @@ function doAdminLogin() {
   hideAuthOverlay();
   _loggedIn = true;
   showAdminPanel();
+}
+
+function clearAuthData() {
+  if (!confirm('This clears the saved login. You will need to register again. Continue?')) return;
+  STATE.auth = { username:'', passwordHash:'', created:'' };
+  saveState();
+  _setSession(false);
+  renderRegisterForm();
 }
 
 
