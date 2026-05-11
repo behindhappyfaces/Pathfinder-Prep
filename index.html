@@ -3995,8 +3995,12 @@ function renderLuminaries() {
 const STUDENT_USER = 'pathfinder';
 const STUDENT_PASS = 'Prep2026!';
 const ADMIN_PW     = 'PathfinderCoach2026';
+const AUTH_KEY     = 'pathfinder_auth';
 
 let _loggedIn = false;
+
+function _isSessionActive() { return localStorage.getItem(AUTH_KEY) === '1'; }
+function _setSession(v)     { if (v) localStorage.setItem(AUTH_KEY,'1'); else localStorage.removeItem(AUTH_KEY); }
 
 function togglePassVis(inputId, btn) {
   const inp = document.getElementById(inputId);
@@ -4017,8 +4021,7 @@ function _pwField(id, placeholder, autocomplete) {
 
 function logOut() {
   _loggedIn = false;
-  STATE.loggedIn = false;
-  saveState();
+  _setSession(false);
   showAuthOverlay();
 }
 
@@ -4075,13 +4078,13 @@ function doLogin() {
     err.textContent = 'Incorrect username or password. Contact your coach.';
     return;
   }
-  STATE.loggedIn = true;
+  _setSession(true);
   if (!STATE.name) {
     STATE.name = user;
     const ni = document.getElementById('nameInput'); if (ni) ni.value = user;
     const hn = document.getElementById('heroName'); if (hn) hn.textContent = user;
+    saveState();
   }
-  saveState();
   _loggedIn = true;
   hideAuthOverlay();
 }
@@ -4245,7 +4248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderEligibilityQuiz();
   switchBranch(STATE.branch);
   calcStreak();
-  if (STATE.loggedIn) {
+  if (_isSessionActive()) {
     _loggedIn = true;
     hideAuthOverlay();
   } else {
